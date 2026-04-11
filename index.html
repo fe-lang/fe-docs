@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fe API Documentation</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 600px;
+      margin: 80px auto;
+      padding: 0 20px;
+      color: #e4e4e4;
+      background: #0d1117;
+    }
+    a { color: #7c8aff; }
+    .status { color: #9ba3af; }
+  </style>
+</head>
+<body>
+  <p class="status">Loading...</p>
+  <script>
+    fetch("/versions.json")
+      .then(function(r) { return r.json(); })
+      .then(function(v) {
+        if (v.latest) {
+          location.href = "/" + v.latest + "/";
+        } else {
+          document.querySelector(".status").textContent = "No versions published yet.";
+        }
+      })
+      .catch(function() {
+        document.querySelector(".status").textContent = "Failed to load version list.";
+      });
+  </script>
+</body>
+</html>
