@@ -24,7 +24,7 @@
       .then(function(r) { return r.json(); })
       .then(function(v) {
         if (v.latest) {
-          location.href = v.latest + "/";
+          location.href = v.latest + "/" + location.hash;
         } else {
           document.querySelector(".status").textContent = "No versions published yet.";
         }
