@@ -1,19 +1,32 @@
 #!/usr/bin/env bash
 # Deploy a new version of Fe docs to the doc site.
 #
-# Usage: ./deploy.sh <version> <docs-json-path> <bundle-dir>
+# Usage: ./deploy.sh <docs-json-path> <bundle-dir>
 #
-# Example:
-#   ./deploy.sh 26.0.0 /tmp/docs/docs.json /tmp/bundle/
-#
+# The version is read from compiler_version in docs.json.
 # The bundle-dir should contain: fe-web.js, fe-highlight.css, styles.css
-# (produced by `fe doc bundle --with-css`)
 
 set -euo pipefail
 
-VERSION="${1:?Usage: deploy.sh <version> <docs-json-path> <bundle-dir>}"
-DOCS_JSON="${2:?Usage: deploy.sh <version> <docs-json-path> <bundle-dir>}"
-BUNDLE_DIR="${3:?Usage: deploy.sh <version> <docs-json-path> <bundle-dir>}"
+DOCS_JSON="${1:?Usage: deploy.sh <docs-json-path> <bundle-dir>}"
+BUNDLE_DIR="${2:?Usage: deploy.sh <docs-json-path> <bundle-dir>}"
+
+if [ ! -f "$DOCS_JSON" ]; then
+  echo "Error: $DOCS_JSON not found" >&2
+  exit 1
+fi
+
+# Read version from the docs.json envelope
+VERSION=$(python3 -c "
+import json, sys
+with open('$DOCS_JSON') as f:
+    d = json.load(f)
+v = d.get('compiler_version')
+if not v:
+    print('Error: docs.json missing compiler_version', file=sys.stderr)
+    sys.exit(1)
+print(v)
+")
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -31,10 +44,6 @@ for f in fe-web.js fe-highlight.css styles.css; do
 done
 
 # 2. Create version directory with docs.json
-if [ ! -f "$DOCS_JSON" ]; then
-  echo "Error: $DOCS_JSON not found" >&2
-  exit 1
-fi
 mkdir -p "$VERSION"
 cp "$DOCS_JSON" "$VERSION/docs.json"
 echo "  Created $VERSION/docs.json"
@@ -57,8 +66,6 @@ except (FileNotFoundError, json.JSONDecodeError):
 if version not in data["versions"]:
     data["versions"].insert(0, version)
 
-# Sort versions in reverse order (newest first)
-# Simple string sort works for semver-like versions if major version width is consistent
 data["versions"].sort(key=lambda v: [int(x) for x in v.split(".")], reverse=True)
 data["latest"] = data["versions"][0]
 
