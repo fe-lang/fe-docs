@@ -4,34 +4,24 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Fe API Documentation</title>
-  <style>
-    body {
-      font-family: system-ui, -apple-system, sans-serif;
-      max-width: 600px;
-      margin: 80px auto;
-      padding: 0 20px;
-      color: #e4e4e4;
-      background: #0d1117;
-    }
-    a { color: #7c8aff; }
-    .status { color: #9ba3af; }
-  </style>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="fe-highlight.css">
 </head>
 <body>
-  <p class="status">Loading...</p>
+  <script src="fe-web.js"></script>
   <script>
+    // Load the latest version's docs.json and render it here.
+    // Hash fragments (e.g. #core::result::Result/enum) are preserved
+    // because no redirect occurs — the viewer loads in place.
     fetch("versions.json")
       .then(function(r) { return r.json(); })
       .then(function(v) {
-        if (v.latest) {
-          location.href = v.latest + "/" + location.hash;
-        } else {
-          document.querySelector(".status").textContent = "No versions published yet.";
-        }
-      })
-      .catch(function() {
-        document.querySelector(".status").textContent = "Failed to load version list.";
+        if (!v.latest) return;
+        var viewer = document.querySelector("fe-doc-viewer");
+        viewer.setAttribute("src", v.latest + "/docs.json");
+        viewer.setAttribute("title", "Fe " + v.latest + " Standard Library");
       });
   </script>
+  <fe-doc-viewer title="Fe Standard Library" routing="hash" show-search></fe-doc-viewer>
 </body>
 </html>
