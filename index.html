@@ -20,11 +20,11 @@
 <body>
   <p class="status">Loading...</p>
   <script>
-    fetch("/versions.json")
+    fetch("versions.json")
       .then(function(r) { return r.json(); })
       .then(function(v) {
         if (v.latest) {
-          location.href = "/" + v.latest + "/";
+          location.href = v.latest + "/";
         } else {
           document.querySelector(".status").textContent = "No versions published yet.";
         }

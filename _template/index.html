@@ -4,16 +4,16 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Fe {{VERSION}} — API Reference</title>
-  <link rel="stylesheet" href="/styles.css">
-  <link rel="stylesheet" href="/fe-highlight.css">
+  <link rel="stylesheet" href="../styles.css">
+  <link rel="stylesheet" href="../fe-highlight.css">
 </head>
 <body>
-  <script src="/fe-web.js"></script>
+  <script src="../fe-web.js"></script>
   <fe-doc-viewer title="Fe {{VERSION}} Standard Library" src="docs.json"
-    routing="hash" show-search back-href="/" back-label="All Versions"></fe-doc-viewer>
+    routing="hash" show-search back-href="../" back-label="All Versions"></fe-doc-viewer>
   <script>
     // Version picker — injected into the viewer header after it renders
-    fetch("/versions.json")
+    fetch("../versions.json")
       .then(function(r) { return r.json(); })
       .then(function(v) {
         if (!v.versions || v.versions.length < 2) return;
@@ -29,7 +29,7 @@
           picker.appendChild(opt);
         }
         picker.addEventListener("change", function() {
-          location.href = "/" + this.value + "/" + location.hash;
+          location.href = "../" + this.value + "/" + location.hash;
         });
         // Wait for viewer to render, then inject (give up after 5s)
         var retries = 0;
