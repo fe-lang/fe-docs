@@ -64,13 +64,13 @@ endif
 	@echo "  Created $(VERSION)/ ($$(du -h "$(VERSION)/docs.json.gz" | cut -f1))"
 	@[ -f versions.json ] || echo '{"latest":"","versions":[]}' > versions.json
 	@jq --arg v "$(VERSION)" \
-		'if (.versions | index($$v)) then . else .versions += [$$v] end | .latest = ([.versions[] | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$$"))] | first // .versions[0])' \
+		'if (.versions | index($$v)) then . else .versions += [$$v] end | .latest = ([.versions[] | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$$"))] | sort_by(split(".") | map(tonumber)) | last // .versions[0])' \
 		versions.json > versions.json.tmp && mv versions.json.tmp versions.json
 	@echo "  versions.json: latest=$$(jq -r '.latest' versions.json), $$(jq '.versions | length' versions.json) versions"
 
 build-all:
 	@echo "Fetching release tags..."; \
-	tags=$$(gh release list --repo $(FE_REPO) --limit 100 --json tagName --jq '.[].tagName | select(startswith("v"))'); \
+	tags=$$(gh release list --repo $(FE_REPO) --limit 100 --json tagName --jq '.[].tagName | select(startswith("v2"))'); \
 	failed=0; \
 	for tag in $$tags; do \
 		$(MAKE) --no-print-directory _build-tag T=$$tag FORCE="$(FORCE)" || failed=$$((failed + 1)); \
