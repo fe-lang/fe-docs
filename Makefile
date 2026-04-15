@@ -1,116 +1,95 @@
 # Fe Docs — Build & deploy versioned stdlib documentation
 #
-# Prerequisites:
-#   - fe binary with --stdlib-path support
-#   - gh CLI (lists release tags)
-#   - python3 (reads docs.json metadata)
-#   - local clone of fe repo (FE_SRC, for checking out ingots per tag)
+# Prerequisites: fe binary with --stdlib-path, gh CLI, gzip, python3
 #
 # Usage:
-#   make build-all                  # Build docs for all eligible tags
-#   make build-all FORCE=1          # Rebuild everything, ignore cache
-#   make build TAG=v26.0.0          # Build docs for a specific tag
-#   make build TAG=v26.0.0 FORCE=1  # Force rebuild a specific tag
-#   make list                       # Show which tags would be built
-#   make clean                      # Remove build cache
+#   make build-all FE_SRC=../fe FE=path/to/fe   # Build all tags
+#   make build-all FE_SRC=../fe FE=... FORCE=1   # Rebuild everything
+#   make build TAG=v26.0.0 FE_SRC=../fe FE=...   # Build one tag
+#   make deploy VERSION=26.0.0 OUTDIR=/tmp/out   # Deploy pre-built docs
+#   make list                                     # Show tag status
 
 FE       ?= fe
 FE_REPO  ?= argotorg/fe
-FE_SRC   ?= $(error FE_SRC is required — path to a local clone of $(FE_REPO))
-CACHE    := .build-cache
+FE_SRC   ?= $(error FE_SRC required — path to local clone of $(FE_REPO))
+BUILD    := _build
 
 SHELL := /bin/bash
 .SHELLFLAGS := -euo pipefail -c
 
-# ── Single tag build ──────────────────────────────────────────────
+.PHONY: build build-all deploy list clean
 
-.PHONY: build
 build:
 ifndef TAG
-	$(error TAG is required. Usage: make build TAG=v26.0.0)
+	$(error TAG required. Usage: make build TAG=v26.0.0 FE_SRC=../fe FE=path/to/fe)
 endif
 	@$(MAKE) --no-print-directory _build-tag T=$(TAG)
 
-# Internal target that builds one tag. Called by build and build-all.
-.PHONY: _build-tag
 _build-tag:
 	@tag="$(T)"; \
 	version="$${tag#v}"; \
-	cache_key="$(CACHE)/$${version}.schema"; \
-	\
-	if [ -f "$$cache_key" ] && [ -z "$(FORCE)" ]; then \
-		cached=$$(cat "$$cache_key"); \
-		if [ -f "$${version}/docs.json" ]; then \
-			current=$$(python3 -c "import json; print(json.load(open('$${version}/docs.json')).get('schema_version',''))" 2>/dev/null || echo ""); \
-			if [ "$$cached" = "$$current" ] && [ -n "$$current" ]; then \
-				echo "SKIP $$tag (schema v$$cached already built)"; \
-				exit 0; \
-			fi; \
-		fi; \
+	if [ -f "$${version}/docs.json.gz" ] && [ -z "$(FORCE)" ]; then \
+		echo "SKIP $$tag"; \
+		exit 0; \
 	fi; \
-	\
 	echo "BUILD $$tag ..."; \
-	tmpdir=$$(mktemp -d); \
-	trap 'rm -rf "$$tmpdir"' EXIT; \
-	\
+	rm -rf "$(BUILD)"; mkdir -p "$(BUILD)/out"; \
 	git -C "$(FE_SRC)" archive "$$tag" -- ingots/ 2>/dev/null \
-		| tar -xC "$$tmpdir" \
-	|| { echo "  ERROR: git archive failed for $$tag — does the tag exist in $(FE_SRC)?" >&2; exit 1; }; \
-	\
-	if [ ! -d "$$tmpdir/ingots/core" ]; then \
-		echo "  ERROR: $$tag has no ingots/core" >&2; \
-		exit 1; \
-	fi; \
-	\
-	outdir="$$tmpdir/out"; \
-	mkdir -p "$$outdir"; \
-	echo "" > "$$tmpdir/empty.fe"; \
-	$(FE) doc --builtins --stdlib-path "$$tmpdir/ingots" "$$tmpdir/empty.fe" -o "$$outdir" json; \
-	$(FE) doc -o "$$outdir" bundle --with-css; \
-	\
-	./deploy.sh "$$outdir/docs.json" "$$outdir"; \
-	\
-	new_schema=$$(python3 -c "import json; print(json.load(open('$${version}/docs.json')).get('schema_version',''))" 2>/dev/null || echo "?"); \
-	mkdir -p "$(CACHE)"; \
-	echo "$$new_schema" > "$$cache_key"; \
-	echo "  DONE $$tag (schema v$$new_schema)"
+		| tar -xC "$(BUILD)" \
+	|| { echo "  ERROR: failed to get ingots/ for $$tag" >&2; exit 1; }; \
+	[ -d "$(BUILD)/ingots/core" ] || { echo "  ERROR: $$tag has no ingots/core" >&2; exit 1; }; \
+	echo "" > "$(BUILD)/empty.fe"; \
+	$(FE) doc --builtins --stdlib-path "$(BUILD)/ingots" "$(BUILD)/empty.fe" -o "$(BUILD)/out" json; \
+	$(FE) doc -o "$(BUILD)/out" bundle --with-css; \
+	$(MAKE) --no-print-directory deploy VERSION="$$version" OUTDIR="$(BUILD)/out"; \
+	rm -rf "$(BUILD)"; \
+	echo "  DONE $$tag"
 
-# ── Build all eligible tags ───────────────────────────────────────
+deploy:
+ifndef VERSION
+	$(error VERSION required)
+endif
+ifndef OUTDIR
+	$(error OUTDIR required — directory containing docs.json, fe-web.js, etc.)
+endif
+	@echo "Deploying Fe $(VERSION) docs..."
+	@for f in fe-web.js fe-highlight.css styles.css; do \
+		[ -f "$(OUTDIR)/$$f" ] && cp "$(OUTDIR)/$$f" "./$$f" && echo "  Updated $$f" || true; \
+	done
+	@mkdir -p "$(VERSION)"
+	@gzip -c "$(OUTDIR)/docs.json" > "$(VERSION)/docs.json.gz"
+	@sed 's|{{VERSION}}|$(VERSION)|g' _template/index.html > "$(VERSION)/index.html"
+	@echo "  Created $(VERSION)/ ($$(du -h "$(VERSION)/docs.json.gz" | cut -f1))"
+	@[ -f versions.json ] || echo '{"latest":"","versions":[]}' > versions.json
+	@jq --arg v "$(VERSION)" \
+		'if (.versions | index($$v)) then . else .versions += [$$v] end | .latest = ([.versions[] | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$$"))] | first // .versions[0])' \
+		versions.json > versions.json.tmp && mv versions.json.tmp versions.json
+	@echo "  versions.json: latest=$$(jq -r '.latest' versions.json), $$(jq '.versions | length' versions.json) versions"
 
-.PHONY: build-all
 build-all:
-	@echo "Discovering release tags from $(FE_REPO)..."
-	@tags=$$(gh release list --repo $(FE_REPO) --limit 100 --json tagName \
-		--jq '[.[].tagName | select(startswith("v26"))] | sort_by(split(".") | map(split("-") | map(tonumber? // .))) | .[]'); \
-	count=$$(echo "$$tags" | wc -l | tr -d ' '); \
-	echo "Found $$count eligible tags"; \
-	echo ""; \
+	@echo "Fetching release tags..."; \
+	tags=$$(gh release list --repo $(FE_REPO) --limit 100 --json tagName --jq '.[].tagName | select(startswith("v"))'); \
+	failed=0; \
 	for tag in $$tags; do \
-		$(MAKE) --no-print-directory _build-tag T=$$tag FORCE="$(FORCE)" || true; \
+		$(MAKE) --no-print-directory _build-tag T=$$tag FORCE="$(FORCE)" || failed=$$((failed + 1)); \
 	done; \
 	echo ""; \
-	echo "Done. Review changes, then commit and push."
+	if [ $$failed -gt 0 ]; then \
+		echo "WARNING: $$failed version(s) failed."; \
+	else \
+		echo "All versions built."; \
+	fi
 
-# ── List what would be built ──────────────────────────────────────
-
-.PHONY: list
 list:
-	@tags=$$(gh release list --repo $(FE_REPO) --limit 100 --json tagName \
-		--jq '[.[].tagName | select(startswith("v26"))] | sort_by(split(".") | map(split("-") | map(tonumber? // .))) | .[]'); \
+	@tags=$$(gh release list --repo $(FE_REPO) --limit 100 --json tagName --jq '.[].tagName | select(startswith("v"))'); \
 	for tag in $$tags; do \
 		version="$${tag#v}"; \
-		cache_key="$(CACHE)/$${version}.schema"; \
-		if [ -f "$$cache_key" ] && [ -f "$${version}/docs.json" ]; then \
-			schema=$$(cat "$$cache_key"); \
-			echo "  $$tag  (cached, schema v$$schema)"; \
+		if [ -f "$${version}/docs.json.gz" ]; then \
+			echo "  $$tag  (built)"; \
 		else \
 			echo "  $$tag  (needs build)"; \
 		fi; \
 	done
 
-# ── Clean build cache ────────────────────────────────────────────
-
-.PHONY: clean
 clean:
-	rm -rf $(CACHE)
-	@echo "Build cache cleared. Next build-all will rebuild everything."
+	rm -rf $(BUILD)
