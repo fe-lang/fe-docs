@@ -40,6 +40,8 @@ _build-tag:
 	[ -d "$(BUILD)/ingots/core" ] || { echo "  ERROR: $$tag has no ingots/core" >&2; exit 1; }; \
 	echo "" > "$(BUILD)/empty.fe"; \
 	$(FE) doc --builtins --stdlib-path "$(BUILD)/ingots" "$(BUILD)/empty.fe" -o "$(BUILD)/out" json; \
+	jq '.index.items |= [.[] | select(.path != "empty")] | .index.modules |= [.[] | select(.path != "empty")]' \
+		"$(BUILD)/out/docs.json" > "$(BUILD)/out/docs.json.tmp" && mv "$(BUILD)/out/docs.json.tmp" "$(BUILD)/out/docs.json"; \
 	$(FE) doc -o "$(BUILD)/out" bundle --with-css; \
 	$(MAKE) --no-print-directory deploy VERSION="$$version" OUTDIR="$(BUILD)/out"; \
 	rm -rf "$(BUILD)"; \
