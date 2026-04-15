@@ -146,7 +146,7 @@ function feClearDefaultHighlight() {
 // When SCHEMA_VERSION is bumped in model.rs, add a migration case here
 // and update FE_CURRENT_SCHEMA to match.
 // ============================================================================
-var FE_CURRENT_SCHEMA = 1;
+var FE_CURRENT_SCHEMA = 2;
 
 function feMigrate(data) {
   if (!data) return data;
@@ -4895,6 +4895,8 @@ var _ITEM_KIND = {
   "const":    { str: "const",   plural: "Constants",      display: "Constant",     order: 7 },
   impl:       { str: "impl",    plural: "Implementations", display: "Implementation", order: 8 },
   impl_trait: { str: "impl",    plural: "Trait Implementations", display: "Trait Implementation", order: 9 },
+  msg:         { str: "msg",    plural: "Messages",       display: "Message",      order: 1 },
+  msg_variant: { str: "msg_variant", plural: "Message Variants", display: "Message Variant", order: 3 },
 };
 
 var _CHILD_KIND = {
