@@ -6,6 +6,7 @@
 #   make build-all FE_SRC=../fe FE=path/to/fe   # Build all tags
 #   make build-all FE_SRC=../fe FE=... FORCE=1   # Rebuild everything
 #   make build TAG=v26.0.0 FE_SRC=../fe FE=...   # Build one tag
+#   make build-stable FE_SRC=../fe FE=...         # Build stable releases only
 #   make deploy VERSION=26.0.0 OUTDIR=/tmp/out   # Deploy pre-built docs
 #   make list                                     # Show tag status
 
@@ -17,7 +18,7 @@ BUILD    := _build
 SHELL := /bin/bash
 .SHELLFLAGS := -euo pipefail -c
 
-.PHONY: build build-all deploy list clean
+.PHONY: build build-all build-stable deploy list clean
 
 build:
 ifndef TAG
@@ -67,6 +68,20 @@ endif
 		'if (.versions | index($$v)) then . else .versions += [$$v] end | .latest = ([.versions[] | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$$"))] | sort_by(split(".") | map(tonumber)) | last // .versions[0])' \
 		versions.json > versions.json.tmp && mv versions.json.tmp versions.json
 	@echo "  versions.json: latest=$$(jq -r '.latest' versions.json), $$(jq '.versions | length' versions.json) versions"
+
+build-stable:
+	@echo "Fetching stable release tags..."; \
+	tags=$$(gh release list --repo $(FE_REPO) --limit 100 --json tagName --jq '.[].tagName | select(startswith("v2") and test("^v[0-9]+\\.[0-9]+\\.[0-9]+$$"))'); \
+	failed=0; \
+	for tag in $$tags; do \
+		$(MAKE) --no-print-directory _build-tag T=$$tag FORCE="$(FORCE)" || failed=$$((failed + 1)); \
+	done; \
+	echo ""; \
+	if [ $$failed -gt 0 ]; then \
+		echo "WARNING: $$failed version(s) failed."; \
+	else \
+		echo "All stable versions built."; \
+	fi
 
 build-all:
 	@echo "Fetching release tags..."; \
