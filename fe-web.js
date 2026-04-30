@@ -146,7 +146,7 @@ function feClearDefaultHighlight() {
 // When SCHEMA_VERSION is bumped in model.rs, add a migration case here
 // and update FE_CURRENT_SCHEMA to match.
 // ============================================================================
-var FE_CURRENT_SCHEMA = 2;
+var FE_CURRENT_SCHEMA = 4;
 
 function feMigrate(data) {
   if (!data) return data;
@@ -166,6 +166,52 @@ function feMigrate(data) {
   if (v < 1) {
     // v0 → v1: envelope normalization only, no field changes
     data.schema_version = 1;
+  }
+
+  if (v < 2) {
+    // v1 → v2: added msg/msg_variant item kinds, no structural changes
+    data.schema_version = 2;
+  }
+
+  if (v < 3) {
+    // v2 → v3: msg variants are no longer top-level DocItems; they live as
+    // `kind: "variant"` children of their parent msg DocItem (mirrors enum
+    // variants). SCIP doc_url for msg variants moved from
+    // `<path>/msg_variant` to `<parent>/msg~variant.<name>`.
+    //
+    // For v<3 data: drop stale top-level msg_variant items from index.items
+    // and rewrite any lingering `/msg_variant` SCIP doc_urls to the anchor
+    // form. Best-effort — consumers holding v<3 docs.json should regenerate.
+    if (data.index && data.index.items) {
+      data.index.items = data.index.items.filter(function (it) {
+        return it && it.kind !== "msg_variant";
+      });
+    }
+    if (data.scip && data.scip.symbols) {
+      var syms = data.scip.symbols;
+      for (var k in syms) {
+        if (!syms.hasOwnProperty(k)) continue;
+        var url = syms[k].doc_url;
+        if (!url) continue;
+        // /msg_variant → parent /msg~variant.<name>. Drop any legacy
+        // sub-anchor (e.g. ~field.x) — the router splits on the first ~,
+        // so a doubled tilde would produce a hash that matches no element
+        // ID. Migrated deep-links land on the variant row instead.
+        var m = url.match(/^(.*)::([^:]+)\/msg_variant(~.*)?$/);
+        if (m) {
+          syms[k].doc_url = m[1] + "/msg~variant." + m[2];
+        }
+      }
+    }
+    data.schema_version = 3;
+  }
+
+  if (v < 4) {
+    // v3 → v4: contract pages now emit `init` and `recv_handler` children
+    // (the init block and each recv arm). No structural rewrite is needed
+    // for old data; downstream consumers just won't see these rows until
+    // they regenerate docs.json.
+    data.schema_version = 4;
   }
 
   return data;
@@ -4299,10 +4345,28 @@ class FeCodeBlock extends HTMLElement {
       this.shadowRoot.adoptedStyleSheets = [sheet];
       return;
     }
-    // Stylesheet not available yet (non-bundled, <link> still loading).
-    // Wait for it via the shared pending queue.
-    _pendingStyleBlocks.push(this);
-    _startStylesheetWatch();
+    // No constructed sheet available. If there's a <link> stylesheet still
+    // loading, wait for it. Otherwise inject CSS directly as a fallback.
+    var hasHighlightLink = false;
+    var links = document.querySelectorAll('link[rel="stylesheet"]');
+    for (var i = 0; i < links.length; i++) {
+      if ((links[i].getAttribute("href") || "").indexOf("highlight") !== -1) {
+        hasHighlightLink = true;
+        break;
+      }
+    }
+    if (hasHighlightLink) {
+      _pendingStyleBlocks.push(this);
+      _startStylesheetWatch();
+    } else {
+      // Last resort: inject CSS text into shadow root directly
+      var css = _FE_HIGHLIGHT_CSS || _extractHighlightCSS();
+      if (css) {
+        var style = document.createElement("style");
+        style.textContent = css;
+        this.shadowRoot.prepend(style);
+      }
+    }
   }
 
   /** Look up an item by path in per-component or global index. */
@@ -4920,11 +4984,15 @@ var _ITEM_KIND = {
 };
 
 var _CHILD_KIND = {
-  field:       { plural: "Fields",              anchor: "field",            order: 1 },
-  variant:     { plural: "Variants",            anchor: "variant",          order: 0 },
-  method:      { plural: "Methods",             anchor: "tymethod",         order: 4 },
-  assoc_type:  { plural: "Associated Types",    anchor: "associatedtype",   order: 2 },
-  assoc_const: { plural: "Associated Constants", anchor: "associatedconstant", order: 3 },
+  field:        { plural: "Fields",              anchor: "field",            order: 1 },
+  variant:      { plural: "Variants",            anchor: "variant",          order: 0 },
+  method:       { plural: "Methods",             anchor: "tymethod",         order: 6 },
+  assoc_type:   { plural: "Associated Types",    anchor: "associatedtype",   order: 4 },
+  assoc_const:  { plural: "Associated Constants", anchor: "associatedconstant", order: 5 },
+  // Contract-specific child kinds (emitted by crates/fe/src/extract.rs for
+  // Contract items — see DocChildKind::{Init,RecvHandler}).
+  init:         { plural: "Initializer",         anchor: "init",             order: 2 },
+  recv_handler: { plural: "Message Handlers",    anchor: "handler",          order: 3 },
 };
 
 function _diKindStr(kind)     { return (_ITEM_KIND[kind] || {}).str || kind; }
@@ -4939,7 +5007,7 @@ function _diEsc(s) {
 }
 
 function _diKindBadge(kind) {
-  return '<span class="kind-badge ' + _diEsc(kind) + '">' + _diEsc(kind) + "</span>";
+  return '<span class="kind-badge ' + _diEsc(_diKindStr(kind)) + '">' + _diEsc(_diKindStr(kind)) + "</span>";
 }
 
 function _diGroupByKind(items, kindFn) {
@@ -5186,7 +5254,8 @@ class FeDocItem extends HTMLElement {
 
   _renderBreadcrumbs(item) {
     var segments = item.path.split("::");
-    var base = this.getAttribute("base") || "";
+    var index = this._getIndex();
+    var items = (index && index.items) || [];
     var html = '<nav class="breadcrumb">';
     var accumulated = "";
     for (var i = 0; i < segments.length; i++) {
@@ -5198,9 +5267,17 @@ class FeDocItem extends HTMLElement {
       if (i === segments.length - 1) {
         html += '<span class="breadcrumb-current">' + _diEsc(segments[i]) + "</span>";
       } else {
-        var href = base ? base + "#" + accumulated + "/mod" : "#" + accumulated + "/mod";
-        html += '<a href="' + _diEsc(href) + '" class="breadcrumb-link">' +
-          _diEsc(segments[i]) + "</a>";
+        // Resolve the real kind for each ancestor segment so non-module
+        // containers (e.g. `msg`) link to their actual page, not `/mod`.
+        var suffix = "mod";
+        for (var k = 0; k < items.length; k++) {
+          if (items[k].path === accumulated) {
+            suffix = _diKindStr(items[k].kind);
+            break;
+          }
+        }
+        html += '<a href="' + _diEsc(this._itemHref(accumulated + "/" + suffix)) +
+          '" class="breadcrumb-link">' + _diEsc(segments[i]) + "</a>";
       }
     }
     html += "</nav>";
@@ -5253,11 +5330,17 @@ class FeDocItem extends HTMLElement {
       for (var j = 0; j < group.items.length; j++) {
         var child = group.items[j];
         var anchorId = info.anchor + "." + child.name;
+        var rowHref = this._anchorHref(parentUrl, anchorId);
         html += '<div class="member-item" id="' + _diEsc(anchorId) + '">';
-        html += '<div class="member-header">';
+        html += '<a class="member-header-link" href="' + _diEsc(rowHref) + '">';
+        html += '<div class="member-header" data-row-link="true">';
         html += this._renderChildSignature(child);
-        html += '<a href="' + this._anchorHref(parentUrl, anchorId) + '" class="anchor">\u00a7</a>';
+        // Nested <a> is invalid HTML, so use a <span> for the visual anchor
+        // glyph. Clicking anywhere in the header (including this glyph)
+        // navigates via the outer <a>.
+        html += '<span class="anchor" aria-hidden="true">\u00a7</span>';
         html += "</div>";
+        html += "</a>";
         if (child.docs) {
           var childHtml = child.docs.html_body || _diEsc(child.docs.body || child.docs.summary || "");
           html += '<div class="member-docs">' + childHtml + "</div>";
@@ -5649,12 +5732,18 @@ class FeSearch extends HTMLElement {
     if (scip) {
       try {
         var results = JSON.parse(scip.search(query));
-        if (results.length > 0) {
-          for (var k = 0; k < results.length; k++) {
-            var r = results[k];
+        // Drop results without a doc_url — they would render as unclickable
+        // links that land back on the current page. Users hate those.
+        var clickable = [];
+        for (var ck = 0; ck < results.length; ck++) {
+          if (results[ck].doc_url) clickable.push(results[ck]);
+        }
+        if (clickable.length > 0) {
+          for (var k = 0; k < clickable.length; k++) {
+            var r = clickable[k];
             var a = document.createElement("a");
             a.className = "search-result";
-            a.href = "#" + (r.doc_url || "");
+            a.href = "#" + r.doc_url;
             a.setAttribute("role", "option");
 
             var badge = document.createElement("span");
@@ -5684,6 +5773,7 @@ class FeSearch extends HTMLElement {
       module: "mod", function: "fn", struct: "struct", enum: "enum",
       trait: "trait", contract: "contract", type_alias: "type",
       const: "const", impl: "impl", impl_trait: "impl",
+      msg: "msg",
     };
 
     var q = query.toLowerCase();
@@ -5966,6 +6056,8 @@ var _FE_KIND_INFO = {
   contract: { str: "contract", plural: "Contracts", order: 2 },
   type_alias: { str: "type", plural: "Type Aliases", order: 5 },
   "const": { str: "const", plural: "Constants", order: 7 },
+  msg: { str: "msg", plural: "Messages", order: 1 },
+  msg_variant: { str: "msg_variant", plural: "Message Variants", order: 3 },
 };
 
 function _feKindStr(kind) {
@@ -6341,12 +6433,23 @@ class FeDocViewer extends HTMLElement {
       ? "#" + CSS.escape(anchorId) + " { background: var(--target-bg, rgba(99,102,241,0.08)); }"
       : "";
 
+    // Retry a few times so the scroll lands even when the caller races the
+    // content render (e.g. initial page load with #path~anchor in the URL —
+    // _showItem rebuilds content asynchronously, so the target element may
+    // not exist at the first tick).
     var self = this;
-    setTimeout(function () {
+    var attempts = 0;
+    function tryScroll() {
       if (!self._contentEl) return;
       var el = self._contentEl.querySelector("#" + CSS.escape(anchorId));
-      if (el) el.scrollIntoView({ behavior: "smooth" });
-    }, 100);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+      attempts++;
+      if (attempts < 20) setTimeout(tryScroll, 50);
+    }
+    setTimeout(tryScroll, 50);
   }
 
   // ---- SCIP Ambient Highlighting ----
@@ -6576,6 +6679,7 @@ class FeDocViewer extends HTMLElement {
         mod: "module", fn: "function", struct: "struct", enum: "enum",
         trait: "trait", contract: "contract", type: "type_alias",
         "const": "const", impl: "impl",
+        msg: "msg", msg_variant: "msg_variant",
       };
       var kindName = kindMap[kindSuffix];
       if (kindName) {
