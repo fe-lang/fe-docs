@@ -33,7 +33,7 @@ The `FE_SRC` path is used to `git archive` the stdlib sources for each tag. The 
 
 ## CI
 
-New releases trigger the `docs` job in the fe repo's CI. It downloads the release binary, generates docs, and pushes here via `make deploy`.
+New releases trigger the fe repo's CI to download the release binary, generate docs, and publish them here via `make deploy`.
 
 ## Deploy target
 
