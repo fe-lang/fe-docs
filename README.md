@@ -38,3 +38,5 @@ New releases trigger the `docs` job in the fe repo's CI. It downloads the releas
 ## Deploy target
 
 `make deploy VERSION=26.0.0 OUTDIR=/tmp/docs-out` copies build artifacts into the site structure. Called by both `make build` and CI.
+
+`VERSION` must be a numeric release version, optionally followed by a prerelease or build-metadata suffix, such as `26.0.0-alpha.2`.

@@ -14,20 +14,34 @@ FE       ?= fe
 FE_REPO  ?= argotorg/fe
 FE_SRC   ?= $(error FE_SRC required — path to local clone of $(FE_REPO))
 BUILD    := _build
+VERSION_RE := ^([0-9]+\.){2}[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?(\+[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$$
+
+# Keep command-line values literal when make exports them to recipe shells.
+override TAG := $(value TAG)
+override T := $(value T)
+override VERSION := $(value VERSION)
+override OUTDIR := $(value OUTDIR)
+export TAG T VERSION OUTDIR
 
 SHELL := /bin/bash
 .SHELLFLAGS := -euo pipefail -c
 
-.PHONY: build build-all build-stable deploy list clean
+.PHONY: build build-all build-stable deploy list clean test
+
+test:
+	@python3 -m unittest discover -s tests
 
 build:
 ifndef TAG
 	$(error TAG required. Usage: make build TAG=v26.0.0 FE_SRC=../fe FE=path/to/fe)
 endif
-	@$(MAKE) --no-print-directory _build-tag T=$(TAG)
+	@tag="$${TAG}"; \
+	[[ "$$tag" == v* && "$${tag#v}" =~ $(VERSION_RE) ]] || { echo "Invalid release tag: $$tag" >&2; exit 1; }; \
+	T="$$tag" $(MAKE) --no-print-directory _build-tag
 
 _build-tag:
-	@tag="$(T)"; \
+	@tag="$${T}"; \
+	[[ "$$tag" == v* && "$${tag#v}" =~ $(VERSION_RE) ]] || { echo "Invalid release tag: $$tag" >&2; exit 1; }; \
 	version="$${tag#v}"; \
 	if [ -f "$${version}/docs.json.gz" ] && [ -z "$(FORCE)" ]; then \
 		echo "SKIP $$tag"; \
@@ -55,16 +69,17 @@ endif
 ifndef OUTDIR
 	$(error OUTDIR required — directory containing docs.json, fe-web.js, etc.)
 endif
-	@echo "Deploying Fe $(VERSION) docs..."
+	@[[ "$$VERSION" =~ $(VERSION_RE) ]] || { echo "Invalid release version: $$VERSION" >&2; exit 1; }
+	@echo "Deploying Fe $$VERSION docs..."
 	@for f in fe-web.js fe-highlight.css styles.css; do \
-		[ -f "$(OUTDIR)/$$f" ] && cp "$(OUTDIR)/$$f" "./$$f" && echo "  Updated $$f" || true; \
+		[ -f "$$OUTDIR/$$f" ] && cp "$$OUTDIR/$$f" "./$$f" && echo "  Updated $$f" || true; \
 	done
-	@mkdir -p "$(VERSION)"
-	@gzip -c "$(OUTDIR)/docs.json" > "$(VERSION)/docs.json.gz"
-	@sed 's|{{VERSION}}|$(VERSION)|g' _template/index.html > "$(VERSION)/index.html"
-	@echo "  Created $(VERSION)/ ($$(du -h "$(VERSION)/docs.json.gz" | cut -f1))"
+	@mkdir -p "$$VERSION"
+	@gzip -c "$$OUTDIR/docs.json" > "$$VERSION/docs.json.gz"
+	@sed "s|{{VERSION}}|$$VERSION|g" _template/index.html > "$$VERSION/index.html"
+	@echo "  Created $$VERSION/ ($$(du -h "$$VERSION/docs.json.gz" | cut -f1))"
 	@[ -f versions.json ] || echo '{"latest":"","versions":[]}' > versions.json
-	@jq --arg v "$(VERSION)" \
+	@jq --arg v "$$VERSION" \
 		'if (.versions | index($$v)) then . else .versions += [$$v] end | .latest = ([.versions[] | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$$"))] | sort_by(split(".") | map(tonumber)) | last // .versions[0])' \
 		versions.json > versions.json.tmp && mv versions.json.tmp versions.json
 	@echo "  versions.json: latest=$$(jq -r '.latest' versions.json), $$(jq '.versions | length' versions.json) versions"
@@ -74,7 +89,7 @@ build-stable:
 	tags=$$(gh release list --repo $(FE_REPO) --limit 100 --json tagName --jq '.[].tagName | select(startswith("v2") and test("^v[0-9]+\\.[0-9]+\\.[0-9]+$$"))'); \
 	failed=0; \
 	for tag in $$tags; do \
-		$(MAKE) --no-print-directory _build-tag T=$$tag FORCE="$(FORCE)" || failed=$$((failed + 1)); \
+		T="$$tag" $(MAKE) --no-print-directory _build-tag FORCE="$(FORCE)" || failed=$$((failed + 1)); \
 	done; \
 	echo ""; \
 	if [ $$failed -gt 0 ]; then \
@@ -88,7 +103,7 @@ build-all:
 	tags=$$(gh release list --repo $(FE_REPO) --limit 100 --json tagName --jq '.[].tagName | select(startswith("v2"))'); \
 	failed=0; \
 	for tag in $$tags; do \
-		$(MAKE) --no-print-directory _build-tag T=$$tag FORCE="$(FORCE)" || failed=$$((failed + 1)); \
+		T="$$tag" $(MAKE) --no-print-directory _build-tag FORCE="$(FORCE)" || failed=$$((failed + 1)); \
 	done; \
 	echo ""; \
 	if [ $$failed -gt 0 ]; then \
