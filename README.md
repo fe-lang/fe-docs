@@ -33,8 +33,10 @@ The `FE_SRC` path is used to `git archive` the stdlib sources for each tag. The 
 
 ## CI
 
-New releases trigger the `docs` job in the fe repo's CI. It downloads the release binary, generates docs, and pushes here via `make deploy`.
+New releases trigger the fe repo's CI to download the release binary, generate docs, and publish them here via `make deploy`.
 
 ## Deploy target
 
 `make deploy VERSION=26.0.0 OUTDIR=/tmp/docs-out` copies build artifacts into the site structure. Called by both `make build` and CI.
+
+`VERSION` must be a numeric release version, optionally followed by a prerelease or build-metadata suffix, such as `26.0.0-alpha.2`.
